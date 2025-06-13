@@ -1,47 +1,54 @@
-name: Webtunnel
+name: Webtunnel Release
 
 on:
   workflow_dispatch:
     inputs:
-      manual_trigger:
-        description: '手动编译'
-        type: boolean
-        default: false
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+      tag:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+      release_notes:
+        description: 'Release notes or description'
+        required: false
 
 jobs:
-
-  build:
+  build-and-release:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # 用于创建 Release
+      packages: write  # 如果你后续要上传到 GitHub Packages
+
     steps:
-    - uses: actions/checkout@v2
+    - name: Checkout source code
+      uses: actions/checkout@v3
 
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v4
       with:
         go-version: 1.19
-    - name: Install Deps
+
+    - name: Install Dependencies
       run: |
-        go get -u github.com/deepakkamesh/webtunnel/webtunnelserver
-        go get -u github.com/deepakkamesh/webtunnel/webtunnelcommon
-        go get -u github.com/golang/glog
-        go get -u github.com/google/gopacket
-        go get -u github.com/google/gopacket/layers
-        go get -u github.com/gorilla/websocket
-        go get -u github.com/songgao/water
-        go get -u github.com/golang/mock/gomock
+        go mod tidy
 
     - name: Build Server
-      run: go build -v ./examples/servercli/server.go
+      run: |
+        mkdir -p dist
+        GOOS=linux GOARCH=amd64 go build -o dist/server ./examples/servercli/server.go
 
     - name: Build Client
-      run: go build -v ./examples/webtunclient/webtunclient.go ./examples/webtunclient/webtunclient_linux.go
+      run: |
+        GOOS=linux GOARCH=amd64 go build -o dist/client ./examples/webtunclient/
 
-    - name: Test Client
-      run: go test -v ./webtunnelclient/
+    - name: Archive Build Artifacts
+      run: |
+        tar -czvf dist/webtunnel-${{ github.event.inputs.tag }}.tar.gz -C dist client server
 
-    - name: Test Server
-      run: go test -v ./webtunnelserver/
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.event.inputs.tag }}
+        name: Release ${{ github.event.inputs.tag }}
+        body: ${{ github.event.inputs.release_notes }}
+        files: |
+          dist/webtunnel-${{ github.event.inputs.tag }}.tar.gz
